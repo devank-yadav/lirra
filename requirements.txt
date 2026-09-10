@@ -1,0 +1,8 @@
+fastapi>=0.103
+uvicorn[standard]>=0.23
+supabase>=2.4
+pydub>=0.25
+playsound>=1.3
+openai>=1.2
+anthropic>=0.3
+python-dotenv>=1.0

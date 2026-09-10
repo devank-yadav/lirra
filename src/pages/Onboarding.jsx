@@ -2,6 +2,7 @@ import React, { useEffect, useState } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { useAuth } from '../auth/AuthContext'
 import { supabase } from '../lib/supabaseClient'
+import { cacheChildProfile } from '../lib/childrenApi'
 
 export default function Onboarding() {
   const { isAuthed } = useAuth()
@@ -75,6 +76,8 @@ export default function Onboarding() {
         .select()
         .single()
       if (cErr) throw cErr
+
+      cacheChildProfile(child)
 
       // Optional: mark profiles.onboarded = true
       try {

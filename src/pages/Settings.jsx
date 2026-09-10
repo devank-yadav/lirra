@@ -1,14 +1,41 @@
 import React, { useEffect, useState, useMemo } from 'react'
 import { useNavigate } from 'react-router-dom'
 import { useAuth } from '../auth/AuthContext'
+import {
+  fetchChildProfile,
+  saveChildProfile,
+  getCachedChildProfile
+} from '../lib/childrenApi'
 
 export default function Settings() {
   const [child, setChild] = useState({})
+  const [loadingProfile, setLoadingProfile] = useState(true)
+  const [saving, setSaving] = useState(false)
+  const [error, setError] = useState('')
   const navigate = useNavigate()
   const { logout } = useAuth()
 
   useEffect(() => {
-    setChild(JSON.parse(localStorage.getItem('childProfile') || '{}'))
+    const cached = getCachedChildProfile()
+    if (cached) setChild({ ...cached, age: cached.age ?? '' })
+
+    let isMounted = true
+    ;(async () => {
+      try {
+        const profile = await fetchChildProfile()
+        if (!isMounted) return
+        if (profile) setChild({ ...profile, age: profile.age ?? '' })
+      } catch (e) {
+        if (!isMounted) return
+        setError(e.message || 'Unable to load profile')
+      } finally {
+        if (isMounted) setLoadingProfile(false)
+      }
+    })()
+
+    return () => {
+      isMounted = false
+    }
   }, [])
 
   const sessions = useMemo(() => JSON.parse(localStorage.getItem('sessionLogs') || '[]'), [])
@@ -19,10 +46,23 @@ export default function Settings() {
     navigate('/', { replace: true })
   }
 
-  const save = (e) => {
+  const updateField = (key, value) => {
+    setChild(prev => ({ ...prev, [key]: value }))
+  }
+
+  const save = async (e) => {
     e.preventDefault()
-    localStorage.setItem('childProfile', JSON.stringify(child))
-    alert('Saved!')
+    setSaving(true)
+    setError('')
+    try {
+      const saved = await saveChildProfile(child)
+      if (saved) setChild({ ...saved, age: saved.age ?? '' })
+      alert('Saved!')
+    } catch (e) {
+      setError(e.message || 'Unable to save settings')
+    } finally {
+      setSaving(false)
+    }
   }
 
   return (
@@ -46,7 +86,8 @@ export default function Settings() {
                 <label>Name</label>
                 <input
                   value={child.name || ''}
-                  onChange={(e) => setChild({ ...child, name: e.target.value })}
+                  onChange={(e) => updateField('name', e.target.value)}
+                  disabled={loadingProfile}
                 />
               </div>
               <div>
@@ -54,7 +95,8 @@ export default function Settings() {
                 <input
                   type="number"
                   value={child.age || ''}
-                  onChange={(e) => setChild({ ...child, age: e.target.value })}
+                  onChange={(e) => updateField('age', e.target.value)}
+                  disabled={loadingProfile}
                 />
               </div>
             </div>
@@ -63,14 +105,16 @@ export default function Settings() {
                 <label>Hobbies</label>
                 <input
                   value={child.hobbies || ''}
-                  onChange={(e) => setChild({ ...child, hobbies: e.target.value })}
+                  onChange={(e) => updateField('hobbies', e.target.value)}
+                  disabled={loadingProfile}
                 />
               </div>
               <div>
                 <label>Condition</label>
                 <input
                   value={child.condition || ''}
-                  onChange={(e) => setChild({ ...child, condition: e.target.value })}
+                  onChange={(e) => updateField('condition', e.target.value)}
+                  disabled={loadingProfile}
                 />
               </div>
             </div>
@@ -78,15 +122,23 @@ export default function Settings() {
               <label>Preferred language</label>
               <select
                 value={child.language || 'en'}
-                onChange={(e) => setChild({ ...child, language: e.target.value })}
+                  onChange={(e) => updateField('language', e.target.value)}
+                  disabled={loadingProfile}
               >
                 <option value="en">English</option>
                 <option value="es">Español</option>
                 <option value="fr">Français</option>
               </select>
             </div>
+            {error && (
+              <p className="p" style={{ color: 'var(--danger)' }}>
+                {error}
+              </p>
+            )}
             <div className="row" style={{ justifyContent: 'flex-end' }}>
-              <button className="btn">Save</button>
+              <button className="btn" disabled={loadingProfile || saving}>
+                {saving ? 'Saving…' : 'Save'}
+              </button>
             </div>
           </form>
         </div>
@@ -149,4 +201,3 @@ export default function Settings() {
     </>
   )
 }
-

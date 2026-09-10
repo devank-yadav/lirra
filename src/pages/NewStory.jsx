@@ -1,21 +1,41 @@
 // src/pages/NewStory.jsx
 import React, { useEffect, useRef, useState } from 'react'
-import { supabase } from '../lib/supabaseClient'
+import { getCachedChildProfile, fetchChildProfile } from '../lib/childrenApi'
+import { submitRecording } from '../lib/storyApi'
 import { useAudioPlayer } from '../player/AudioPlayerProvider'
 
 export default function NewStory() {
   const { addToQueue, setQueue, play } = useAudioPlayer()
-  const child = JSON.parse(localStorage.getItem('childProfile') || '{}')
+  const [child, setChild] = useState(() => getCachedChildProfile() || {})
 
   const [isRecording, setIsRecording] = useState(false)
   const [elapsed, setElapsed] = useState(0)
   const [status, setStatus] = useState('')
   const [supportedType, setSupportedType] = useState('')
+  const [processing, setProcessing] = useState(false)
+  const [transcript, setTranscript] = useState('')
+  const [story, setStory] = useState('')
+  const [storyAudio, setStoryAudio] = useState('')
 
   const recRef = useRef(null)
   const chunksRef = useRef([])
   const streamRef = useRef(null)
   const tickRef = useRef(null)
+
+  useEffect(() => {
+    let isMounted = true
+    ;(async () => {
+      try {
+        const profile = await fetchChildProfile()
+        if (isMounted && profile) setChild(profile)
+      } catch (e) {
+        console.warn('Unable to load child profile', e)
+      }
+    })()
+    return () => {
+      isMounted = false
+    }
+  }, [])
 
   useEffect(() => {
     if (window.MediaRecorder) {
@@ -34,6 +54,7 @@ export default function NewStory() {
   }, [])
 
   const start = async () => {
+    if (processing) return
     if (!supportedType) { setStatus('Recording not supported in this browser'); return }
     const stream = await navigator.mediaDevices.getUserMedia({ audio: true })
     streamRef.current = stream
@@ -57,25 +78,42 @@ export default function NewStory() {
 
   const handleStop = async () => {
     const blob = new Blob(chunksRef.current, { type: supportedType || 'audio/webm' })
-    const ext = supportedType.includes('mp4') ? 'm4a' : 'webm'
-    const safeName = (child.name || 'child').toLowerCase().replace(/[^a-z0-9]+/g, '-')
-    const path = `recordings/${safeName}/${Date.now()}.${ext}`
+    setProcessing(true)
+    setStatus('Processing…')
+    setTranscript('')
+    setStory('')
+    setStoryAudio('')
 
-    setStatus('Uploading…')
-    const { error } = await supabase.storage.from('audio').upload(path, blob, {
-      contentType: blob.type,
-      upsert: false
-    })
-    if (error) { setStatus('Upload failed'); return }
+    try {
+      const result = await submitRecording({
+        blob,
+        mimeType: blob.type,
+        child
+      })
 
-    const { data: signed } = await supabase.storage.from('audio').createSignedUrl(path, 60 * 60 * 24 * 7)
-    if (signed?.signedUrl) {
-      const track = { id: path, title: `${child.name || 'Child'} Recording`, src: signed.signedUrl }
-      if (typeof addToQueue === 'function') addToQueue(track)
-      else if (typeof setQueue === 'function') setQueue([track])
-      if (typeof play === 'function') play(track.id)
+      setStatus('Story ready')
+      setTranscript(result.transcript || '')
+      setStory(result.story || '')
+      const audioUrl = result.audio_url || result.audioUrl
+      if (audioUrl) {
+        setStoryAudio(audioUrl)
+        const trackId = result.recording_id || `story-${Date.now()}`
+        const track = {
+          id: trackId,
+          title: result.story_title || `${child.name || 'Child'} Story`,
+          src: audioUrl,
+          cover: result.cover_url || null
+        }
+        if (typeof addToQueue === 'function') addToQueue(track)
+        else if (typeof setQueue === 'function') setQueue([track])
+        if (typeof play === 'function') play(track.id)
+      }
+    } catch (err) {
+      console.error(err)
+      setStatus(err.message || 'Unable to process recording')
+    } finally {
+      setProcessing(false)
     }
-    setStatus('Saved')
   }
 
   return (
@@ -122,6 +160,7 @@ export default function NewStory() {
             fontSize: '30px', // Increased font size for the icon
             fontWeight: 'bold'
           }}
+          disabled={processing}
           onMouseEnter={(e) => {
             e.currentTarget.style.transform = 'scale(1.1)'
             e.currentTarget.style.boxShadow = '0 6px 16px rgba(88, 204, 2, 0.4)'
@@ -134,6 +173,23 @@ export default function NewStory() {
           {/* Microphone Icon */}
           <i className="fas fa-microphone" style={{ fontSize: '50px' }}></i> {/* Increased icon size */}
         </button>
+
+        {(transcript || story) && (
+          <div className="card" style={{ marginTop: 32, maxWidth: 640, width: '100%', textAlign: 'left', padding: 24 }}>
+            {transcript && (
+              <div style={{ marginBottom: 16 }}>
+                <h3 className="h2" style={{ fontSize: 20 }}>Transcript</h3>
+                <p className="p" style={{ whiteSpace: 'pre-wrap' }}>{transcript}</p>
+              </div>
+            )}
+            {story && (
+              <div>
+                <h3 className="h2" style={{ fontSize: 20 }}>Story</h3>
+                <p className="p" style={{ whiteSpace: 'pre-wrap' }}>{story}</p>
+              </div>
+            )}
+          </div>
+        )}
       </div>
     </>
   )
